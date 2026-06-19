@@ -1,0 +1,2 @@
+# discord-delete-Vandalism-server
+discordの極端に重くなる荒らしサーバーから強制的に抜けることができるhtmlです
