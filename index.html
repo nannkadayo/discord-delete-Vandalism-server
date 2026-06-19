@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord 緊急サーバー脱出ツール</title>
+    <!-- シンプルな見た目にするためのCSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        body { padding: 20px; max-width: 800px; margin: 0 auto; }
+        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; max-height: 200px; overflow-y: auto; font-size: 13px; }
+        .guild-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #ccc; }
+        .guild-info { flex-grow: 1; margin-right: 10px; }
+
+        /* 自前トーストのスタイリング */
+        #toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toast {
+            min-width: 250px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: #ffffff;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast-success { background-color: #2ecc71; }
+        .toast-error { background-color: #e74c3c; }
+        .toast-info { background-color: #3498db; }
+    </style>
+</head>
+<body>
+
+    <!-- トースト通知が浮かび上がる土台 -->
+    <div id="toast-container"></div>
+
+    <main class="container">
+        <h2>🚀 Discord 緊急サーバー脱出ツール</h2>
+        <p>ラグサーバー等でアプリが固まった際、ブラウザから直接APIを叩いて避難するための個人用ツールです。入力した情報はDiscordに直接送信され、当サイトのサーバーには一切保存されません。</p>
+        
+        <hr />
+
+        <!-- 設定セクション -->
+        <section>
+            <label for="token">あなたのDiscordトークン (Authorization)</label>
+            <input type="password" id="token" placeholder="トークンを入力してください">
+            <small style="color: #e67e22;">※トークンは絶対に他人に教えないでください。</small>
+        </section>
+
+        <!-- 機能1: 一覧取得 -->
+        <section>
+            <h3>1. 所属サーバー一覧を取得</h3>
+            <button onclick="fetchGuilds()">サーバー一覧を取得する</button>
+            <div id="guilds-list"></div>
+        </section>
+
+        <!-- 機能2: 個別退会 -->
+        <section>
+            <h3>2. サーバーから直接退会 (ID指定)</h3>
+            <label for="guild-id">退会したいサーバーID</label>
+            <input type="text" id="guild-id" placeholder="18桁のサーバーIDを入力">
+            <button class="secondary" onclick="leaveGuildDirect()">このサーバーから退会する</button>
+        </section>
+
+        <!-- ログ出力 -->
+        <section>
+            <h3>実行結果ログ</h3>
+            <pre id="log">ここに詳細な実行結果が表示されます...</pre>
+        </section>
+    </main>
+
+    <script>
+        // 自前トースト通知を表示する共通関数
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerText = message;
+            
+            container.appendChild(toast);
+            
+            // アニメーション用に一瞬遅らせて 'show' クラスを追加
+            setTimeout(() => toast.classList.add('show'), 50);
+            
+            // 4秒後にフェードアウトして消去
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, 4000);
+        }
+
+        // ログ出力用ヘルパー（これまでの文字ログも残します）
+        function writeLog(message, isError = false) {
+            const logElement = document.getElementById('log');
+            const color = isError ? '#e74c3c' : '#2ecc71';
+            logElement.innerHTML = `<span style="color: ${color};">${message}</span>\n` + logElement.innerHTML;
+        }
+
+        // 1. サーバー一覧を取得する関数
+        function fetchGuilds() {
+            const token = document.getElementById('token').value.trim();
+            if (!token) { 
+                showToast('エラー: トークンを入力してください', 'error'); 
+                return; 
+            }
+
+            showToast('サーバー一覧を取得中...', 'info');
+            writeLog('サーバー一覧を取得中...');
+            
+            fetch('https://discord.com/api/v10/users/@me/guilds', {
+                method: 'GET',
+                headers: {
+                    'Authorization': token,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`ステータスコード: ${res.status}`);
+                return res.json();
+            })
+            .then(guilds => {
+                const listDiv = document.getElementById('guilds-list');
+                listDiv.innerHTML = '<h4>所属サーバー一覧</h4>';
+                
+                guilds.forEach(guild => {
+                    // サロゲートペア対策
+                    const safeName = guild.name.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '[特殊文字/絵文字]');
+                    
+                    const item = document.createElement('div');
+                    item.className = 'guild-item';
+                    item.innerHTML = `
+                        <div class="guild-info"><strong>${safeName}</strong> <br><small>(ID: <code>${guild.id}</code>)</small></div>
+                        <button style="padding: 5px 15px; font-size: 13px; width: auto; margin: 0;" class="secondary" onclick="confirmLeave(this, '${guild.id}')">退会</button>
+                    `;
+                    listDiv.appendChild(item);
+                });
+                
+                showToast(`成功: ${guilds.length}個のサーバーを取得しました`, 'success');
+                writeLog(`成功: ${guilds.length} 個のサーバーを取得しました。`);
+            })
+            .catch(err => {
+                showToast(`取得失敗: トークンが無効か通信エラーです`, 'error');
+                writeLog(`取得失敗: ${err.message}`, true);
+            });
+        }
+
+        // alert/confirmを使わない、インライン確認用の関数
+        function confirmLeave(button, guildId) {
+            if (button.innerText === '退会') {
+                button.innerText = '本当に退会？';
+                button.style.backgroundColor = '#e74c3c';
+                button.style.borderColor = '#e74c3c';
+                // 3秒経ったら元の表示に戻す
+                setTimeout(() => {
+                    if (button) {
+                        button.innerText = '退会';
+                        button.style.backgroundColor = '';
+                        button.style.borderColor = '';
+                    }
+                }, 3000);
+            } else {
+                document.getElementById('guild-id').value = guildId;
+                leaveGuildDirect();
+            }
+        }
+
+        // 2. 実際に退会APIを叩く関数
+        function leaveGuildDirect() {
+            const token = document.getElementById('token').value.trim();
+            const guildId = document.getElementById('guild-id').value.trim();
+
+            if (!token || !guildId) { 
+                showToast('エラー: トークンとサーバーIDが必要です', 'error'); 
+                return; 
+            }
+
+            showToast(`サーバーから退会を試みています...`, 'info');
+            writeLog(`サーバー ID: ${guildId} からの退会を試みています...`);
+
+            fetch(`https://discord.com/api/v10/users/@me/guilds/${guildId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(res => {
+                if (res.status === 204 || res.ok) {
+                    showToast('✅ 成功: サーバーから正常に脱出しました！', 'success');
+                    writeLog(`✅ 成功: サーバー (ID: ${guildId}) から正常に脱出しました！`);
+                } else {
+                    showToast(`失敗: ステータスコード ${res.status}`, 'error');
+                    writeLog(`失敗: ステータスコード ${res.status}`, true);
+                }
+            })
+            .catch(err => {
+                showToast(`通信エラーが発生しました`, 'error');
+                writeLog(`通信エラーが発生しました: ${err.message}`, true);
+            });
+        }
+    </script>
+</body>
+</html>
